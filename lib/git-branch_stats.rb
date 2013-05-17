@@ -65,6 +65,7 @@ module Git
 
 
     def self.analyze(branch = `git rev-parse --abbrev-ref HEAD`.strip)
+      warnings = []
       # Get all commits that are only visible for this HEAD (branch).
       # List commits, without merges, of HEAD, that are not any ref from other branches
       branches = `git branch`.split(/\n/)
@@ -88,7 +89,8 @@ module Git
       `git rev-parse --verify --quiet #{diff_origin}`
       if $?.to_i > 0
         diff_origin = independent_commits.last
-        puts "WARN: Branch has independent commits since the first commit of the repo, stats will be skewed (can't run stats *before* the first commit)"
+
+        warnings.push "WARN: Branch has independent commits since the first commit of the repo, stats will be skewed (can't run stats *before* the first commit)"
         # In this case, exclude the last commit (since it won't be included in the stats)
         commit_count = commit_count - 1
       end
@@ -124,7 +126,8 @@ module Git
         :deletions => total_deletions,
         :files_changed => change_count,
         :language_stats => language_stats,
-        :emails => emails
+        :emails => emails,
+        :warnings => warnings
       }
     end
 
