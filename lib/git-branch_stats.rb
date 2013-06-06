@@ -80,46 +80,56 @@ module Git
 
       # Using the list of independent commits, gather stats
 
-      # Start analysis before the last independent commit
-      diff_origin = independent_commits.last + "~"
-      commit_count = independent_commits.length
-      # Fallback if last independent commit is the first commit of the repository
-      # NOTE: Running the analyzer on a branch that has independent commits up to the first commit
-      # will give weird results since it will omit this first commit in the numstats and language analysis.
-      `git rev-parse --verify --quiet #{diff_origin}`
-      if $?.to_i > 0
-        diff_origin = independent_commits.last
+      if independent_commits.any?
+        # Start analysis before the last independent commit
+        diff_origin = independent_commits.last + "~"
+        commit_count = independent_commits.length
+        # Fallback if last independent commit is the first commit of the repository
+        # NOTE: Running the analyzer on a branch that has independent commits up to the first commit
+        # will give weird results since it will omit this first commit in the numstats and language analysis.
+        `git rev-parse --verify --quiet #{diff_origin}`
+        if $?.to_i > 0
+          diff_origin = independent_commits.last
 
-        warnings.push "WARN: Branch has independent commits since the first commit of the repo, stats will be skewed (can't run stats *before* the first commit)"
-        # In this case, exclude the last commit (since it won't be included in the stats)
-        commit_count = commit_count - 1
+          warnings.push "WARN: Branch has independent commits since the first commit of the repo, stats will be skewed (can't run stats *before* the first commit)"
+          # In this case, exclude the last commit (since it won't be included in the stats)
+          commit_count = commit_count - 1
+        end
+
+        # Numstats (files, +/-)
+        numstats = `git diff --numstat #{diff_origin}`.split(/\n/)
+        stats_by_file = numstats.collect do |numstat|
+          additions, deletions, filename = numstat.split(/\t/)
+          {:additions => additions.to_i, :deletions => deletions.to_i, :filename => filename}
+        end
+
+        # Extract content from diffs to generate language stats (only consider diffs that contain added/changed stuff)
+        stats_by_file.select {|numstat| numstat[:additions] > 0}.each do |numstat|
+          # Since first independent commit
+          diff = `git diff #{diff_origin} -- #{numstat[:filename]}`
+          # Collect lines prefixed with a single +
+          new_content = diff.lines.select {|line| line =~ /^\+[^\+]/}.collect {|line| line[1..-1]}.join("\n")
+          # Store in the stats for later language analysis
+          numstat[:content] = new_content
+        end
+
+        # Extract language stats using github's linguist gem
+        language_stats = extract_language_stats(stats_by_file)
+
+        # Normalize stats for json REST API
+        change_count = stats_by_file.length
+        total_additions = stats_by_file.inject(0) {|total, numstat| total += numstat[:additions]}
+        total_deletions = stats_by_file.inject(0) {|total, numstat| total += numstat[:deletions]}
+      else
+        commit_count = 0
+        total_additions = 0
+        total_deletions = 0
+        change_count = 0
+        language_stats = []
+        emails = []
+        warnings.push "No independent commits yet, commit something!"
       end
 
-      # Numstats (files, +/-)
-      numstats = `git diff --numstat #{diff_origin}`.split(/\n/)
-      stats_by_file = numstats.collect do |numstat|
-        additions, deletions, filename = numstat.split(/\t/)
-        {:additions => additions.to_i, :deletions => deletions.to_i, :filename => filename}
-      end
-
-      # Extract content from diffs to generate language stats (only consider diffs that contain added/changed stuff)
-      stats_by_file.select {|numstat| numstat[:additions] > 0}.each do |numstat|
-        # Since first independent commit
-        diff = `git diff #{diff_origin} -- #{numstat[:filename]}`
-        # Collect lines prefixed with a single +
-        new_content = diff.lines.select {|line| line =~ /^\+[^\+]/}.collect {|line| line[1..-1]}.join("\n")
-        # Store in the stats for later language analysis
-        numstat[:content] = new_content
-      end
-
-      # Extract language stats using github's linguist gem
-      language_stats = extract_language_stats(stats_by_file)
-
-      # Normalize stats for json REST API
-      commit_count = commit_count
-      change_count = stats_by_file.length
-      total_additions = stats_by_file.inject(0) {|total, numstat| total += numstat[:additions]}
-      total_deletions = stats_by_file.inject(0) {|total, numstat| total += numstat[:deletions]}
       {
         :commits => commit_count,
         :additions => total_additions,
