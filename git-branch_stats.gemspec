@@ -12,7 +12,7 @@ Gem::Specification.new do |gem|
   gem.summary       = %q{Git branch statistics}
   gem.homepage      = ""
 
-  gem.add_dependency 'github-linguist'
+  gem.add_runtime_dependency 'github-linguist', '~> 2.11', '>= 2.11.4'
 
   gem.files         = `git ls-files`.split($/)
   gem.executables   = gem.files.grep(%r{^bin/}).map{ |f| File.basename(f) }
